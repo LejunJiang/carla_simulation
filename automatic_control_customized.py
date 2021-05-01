@@ -687,7 +687,7 @@ def game_loop(args):
     initial_position_array = initial_positions['arr_0']
     print(initial_position_array.shape)
 
-    for i in range(72, 107, 1):
+    for i in range(107):
         pygame.init()
         pygame.font.init()
         world = None
