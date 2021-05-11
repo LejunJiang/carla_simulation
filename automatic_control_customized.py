@@ -153,7 +153,7 @@ class World(object):
                 sys.exit(1)
             # spawn_points = self.map.get_spawn_points()
             # spawn_point = carla.Transform(carla.Location(x=-120.7, y=149.3, z=2.0), carla.Rotation(yaw=180))
-            spawn_point = carla.Transform(carla.Location(x=x, y=y, z=2.0), carla.Rotation(yaw=theta))
+            spawn_point = carla.Transform(carla.Location(x=x + 0.1, y=y, z=2.0), carla.Rotation(yaw=theta))
             self.player = self.world.try_spawn_actor(blueprint, spawn_point)
         # Set up the sensors.
         self.collision_sensor = CollisionSensor(self.player, self.hud)
@@ -687,7 +687,7 @@ def game_loop(args):
     initial_position_array = initial_positions['arr_0']
     print(initial_position_array.shape)
 
-    for i in range(107):
+    for i in range(89, 107, 1):
         pygame.init()
         pygame.font.init()
         world = None
@@ -807,7 +807,7 @@ def game_loop(args):
             exported_data = np.array(exported_data)
             df = pd.DataFrame(data=exported_data, columns=['Ticks(s)', 'x-acc(m/s^2)', 'y-acc(m/s^2)', 'z-acc(m/s^2)', 'x-vel(m/s)', 'y-vel(m/s)', 'z-vel(m/s)', 'x-loc(m)', 'y-loc(m)', 'x-loc-center(m)', 'y-loc-center(m)', 'z-loc-center(m)',
                                                            'theta(radians)', 'target-speed(m/s)', 'target-x-loc(m)', 'target-y-loc(m)', 'target-z-loc(m)', 'past-throttle', 'past_brake', 'past-delta(radians)', 'throttle', 'brake', 'delta(radians)', 'input', 'speed(m/s)', 'acceleration(m/s^2)', 'd'])
-            df.to_pickle('_out/Data_Collection_new_controller_' + str(i + 1) + '.pd')
+            df.to_pickle('_out/Data_Collection_noisy_controller_' + str(i + 1) + '.pd')
 
             pygame.quit()
 

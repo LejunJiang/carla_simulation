@@ -9,6 +9,7 @@ from collections import deque
 import math
 import numpy as np
 import carla
+import pygame
 from agents.tools.misc import get_speed
 
 
@@ -63,6 +64,15 @@ class VehiclePIDController():
 
         acceleration, _ie = self._lon_controller.run_step(target_speed)
         current_steering = self._lat_controller.run_step(waypoint)
+
+        # # introduce random noise - normal distribution
+        # acceleration += 0.025 * np.random.randn() - 0.0125
+        # current_steering += 0.025 * np.random.randn() - 0.0125
+
+        # # introduce random noise - sinusoidal signal
+        # acceleration += 0.1 * np.sin(1000 * pygame.time.get_ticks() / 1000)
+        # current_steering += 0.1 * np.sin(1000 * pygame.time.get_ticks() / 1000)
+
         control = carla.VehicleControl()
         if acceleration >= 0.0:
             control.throttle = min(acceleration, self.max_throt)
@@ -77,6 +87,11 @@ class VehiclePIDController():
             current_steering = self.past_steering + 0.01
         elif current_steering < self.past_steering - 0.01:
             current_steering = self.past_steering - 0.01
+
+        # if current_steering > self.past_steering + 0.1:
+        #     current_steering = self.past_steering + 0.1
+        # elif current_steering < self.past_steering - 0.1:
+        #     current_steering = self.past_steering - 0.1
 
         if current_steering >= 0:
             steering = min(self.max_steer, current_steering)
