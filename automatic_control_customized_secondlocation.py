@@ -694,172 +694,128 @@ def game_loop(args):
     # state = 0
     # disturbance = 0.05
 
-    for i in range(18, 107, 1):
-        pygame.init()
-        pygame.font.init()
-        world = None
-        exported_data = []
-        try:
-            client = carla.Client(args.host, args.port)
-            client.set_timeout(4.0)
+    pygame.init()
+    pygame.font.init()
+    world = None
+    exported_data = []
+    try:
+        client = carla.Client(args.host, args.port)
+        client.set_timeout(4.0)
 
-            display = pygame.display.set_mode(
-                (args.width, args.height),
-                pygame.HWSURFACE | pygame.DOUBLEBUF)
+        display = pygame.display.set_mode(
+            (args.width, args.height),
+            pygame.HWSURFACE | pygame.DOUBLEBUF)
 
-            hud = HUD(args.width, args.height)
-            # world = World(client.get_world(), hud, args)
-            world = World(client.load_world('Town06'), hud, args,
-                          initial_position_array[0, i], initial_position_array[1, i], initial_position_array[2, i])
-            controller = KeyboardControl(world)
+        hud = HUD(args.width, args.height)
+        # world = World(client.get_world(), hud, args)
+        world = World(client.load_world('Town06'), hud, args,
+                      91.2, 132.6, -20.0)
+        controller = KeyboardControl(world)
 
-            if args.agent == "Roaming":
-                agent = RoamingAgent(world.player)
-            elif args.agent == "Basic":
-                agent = BasicAgent(world.player)
-                spawn_point = world.map.get_spawn_points()[0]
-                agent.set_destination((spawn_point.location.x,
-                                       spawn_point.location.y,
-                                       spawn_point.location.z))
-            else:
-                agent = BehaviorAgent(world.player, behavior=args.behavior)
+        agent = RoamingAgent(world.player)
 
-                spawn_points = world.map.get_spawn_points()
-                random.shuffle(spawn_points)
+        clock = pygame.time.Clock()
 
-                if spawn_points[0].location != agent.vehicle.get_location():
-                    destination = spawn_points[0].location
-                else:
-                    destination = spawn_points[1].location
+        while True and len(exported_data) <= 1487:
+            clock.tick_busy_loop(60)
+            if controller.parse_events(client, world, clock):
+                return
 
-                agent.set_destination(agent.vehicle.get_location(), destination, clean=True)
+            # As soon as the server is ready continue!
+            if not world.world.wait_for_tick(10.0):
+                continue
 
-            clock = pygame.time.Clock()
+            if controller.parse_events(client, world, clock):
+                return
 
-            while True and len(exported_data) <= 1487:
-                clock.tick_busy_loop(60)
-                if controller.parse_events(client, world, clock):
-                    return
+            # as soon as the server is ready continue!
+            world.world.wait_for_tick(10.0)
 
-                # As soon as the server is ready continue!
-                if not world.world.wait_for_tick(10.0):
-                    continue
+            world.tick(clock)
+            world.render(display)
+            pygame.display.flip()
+            control, _ie = agent.run_step()
+            # print(control)
 
-                if args.agent == "Roaming" or args.agent == "Basic":
-                    if controller.parse_events(client, world, clock):
-                        return
+            # control.steer = kp * control.steer
 
-                    # as soon as the server is ready continue!
-                    world.world.wait_for_tick(10.0)
+            control.manual_gear_shift = True
+            control.gear = 3
 
-                    world.tick(clock)
-                    world.render(display)
-                    pygame.display.flip()
-                    control, _ie = agent.run_step()
-                    # print(control)
+            control.brake = 0.0
 
-                    # control.steer = kp * control.steer
+            last_control = world.player.get_control()
+            acceleration = world.player.get_acceleration()
+            velocity = world.player.get_velocity()
+            location = world.player.get_transform()  # need to modify to the rear axles
+            target_speed = agent._local_planner._target_speed
+            target_waypoint = agent._local_planner.target_waypoint
+            # x_rear_wheel = (world.player.get_physics_control(
+            # ).wheels[2].position.x + world.player.get_physics_control().wheels[3].position.x) / 200
+            # y_rear_wheel = (world.player.get_physics_control(
+            # ).wheels[2].position.y + world.player.get_physics_control().wheels[3].position.y) / 200
+            x_rear_wheel = location.location.x - 1.26 * math.cos(location.rotation.yaw / 180 * PI)
+            y_rear_wheel = location.location.y - 1.26 * math.sin(location.rotation.yaw / 180 * PI)
+            exported_data.append([pygame.time.get_ticks() / 1000, acceleration.x, acceleration.y, acceleration.z, velocity.x, velocity.y, velocity.z, x_rear_wheel, y_rear_wheel, location.location.x, location.location.y,
+                                  location.location.z, location.rotation.yaw / 180 *
+                                  PI, target_speed, target_waypoint.transform.location.x, target_waypoint.transform.location.y, target_waypoint.transform.location.z,
+                                  last_control.throttle, last_control.brake, last_control.steer * 70 / 180 *
+                                  PI, control.throttle, control.brake, control.steer *
+                                  70 / 180 * PI, np.tan(control.steer * 70 / 180 * PI),
+                                  np.sqrt(velocity.x * velocity.x + velocity.y * velocity.y), np.sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y), -_ie])
 
-                    control.manual_gear_shift = True
-                    control.gear = 3
+            # introduce random noise - sinusoidal signal
+            control.throttle += 0.2 * np.sin(100 * pygame.time.get_ticks() / 1000)
+            # # add the disturbance to lateral
+            # distance = np.linalg.norm(waypoints_map - np.array([x_rear_wheel, y_rear_wheel]), axis=1)
+            # index_tp = np.argmin(distance)
+            # cte = None
+            # if index_tp < x_map.shape[0] - 1:
+            #     waypoint_vector_x = x_map[index_tp + 1] - x_map[index_tp]
+            #     waypoint_vector_y = y_map[index_tp + 1] - y_map[index_tp]
+            #     start_waypoint_to_car_location_x = x_rear_wheel - x_map[index_tp]
+            #     start_waypoint_to_car_location_y = y_rear_wheel - y_map[index_tp]
+            #     area = -(start_waypoint_to_car_location_x * waypoint_vector_y -
+            #              start_waypoint_to_car_location_y * waypoint_vector_x)
+            #     cte = area / np.linalg.norm(np.array([waypoint_vector_x, waypoint_vector_y]), axis=0)
+            # else:
+            #     waypoint_vector_x = x_map[index_tp] - x_map[index_tp - 1]
+            #     waypoint_vector_y = y_map[index_tp] - y_map[index_tp - 1]
+            #     start_waypoint_to_car_location_x = x_rear_wheel - x_map[index_tp]
+            #     start_waypoint_to_car_location_y = y_rear_wheel - y_map[index_tp]
+            #     area = -(start_waypoint_to_car_location_x * waypoint_vector_y -
+            #              start_waypoint_to_car_location_y * waypoint_vector_x)
+            #     cte = area / np.linalg.norm(np.array([waypoint_vector_x, waypoint_vector_y]), axis=0)
+            # if state == 0:
+            #     if np.abs(cte) < 1e-1:
+            #         state = 1
+            # elif state == 1:
+            #     control.steer += disturbance
+            #     if np.abs(cte) > 0.35:
+            #         state = 2
+            # elif state == 2:
+            #     if np.abs(cte) < 1e-1:
+            #         state = 3
+            # else:
+            #     control.steer -= disturbance
+            #     if np.abs(cte) > 0.35:
+            #         state = 0
+            # introduce random noise - sinusoidal signal
+            control.steer += 0.05 * np.sin(100 * pygame.time.get_ticks() / 1000)
 
-                    control.brake = 0.0
+            world.player.apply_control(control)
 
-                    last_control = world.player.get_control()
-                    acceleration = world.player.get_acceleration()
-                    velocity = world.player.get_velocity()
-                    location = world.player.get_transform()  # need to modify to the rear axles
-                    target_speed = agent._local_planner._target_speed
-                    target_waypoint = agent._local_planner.target_waypoint
-                    # x_rear_wheel = (world.player.get_physics_control(
-                    # ).wheels[2].position.x + world.player.get_physics_control().wheels[3].position.x) / 200
-                    # y_rear_wheel = (world.player.get_physics_control(
-                    # ).wheels[2].position.y + world.player.get_physics_control().wheels[3].position.y) / 200
-                    x_rear_wheel = location.location.x - 1.26 * math.cos(location.rotation.yaw / 180 * PI)
-                    y_rear_wheel = location.location.y - 1.26 * math.sin(location.rotation.yaw / 180 * PI)
-                    exported_data.append([pygame.time.get_ticks() / 1000, acceleration.x, acceleration.y, acceleration.z, velocity.x, velocity.y, velocity.z, x_rear_wheel, y_rear_wheel, location.location.x, location.location.y,
-                                          location.location.z, location.rotation.yaw / 180 *
-                                          PI, target_speed, target_waypoint.transform.location.x, target_waypoint.transform.location.y, target_waypoint.transform.location.z,
-                                          last_control.throttle, last_control.brake, last_control.steer * 70 / 180 *
-                                          PI, control.throttle, control.brake, control.steer *
-                                          70 / 180 * PI, np.tan(control.steer * 70 / 180 * PI),
-                                          np.sqrt(velocity.x * velocity.x + velocity.y * velocity.y), np.sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y), -_ie])
+    finally:
+        if world is not None:
+            world.destroy()
 
-                    # introduce random noise - sinusoidal signal
-                    control.throttle += 0.2 * np.sin(100 * pygame.time.get_ticks() / 1000)
-                    # # add the disturbance to lateral
-                    # distance = np.linalg.norm(waypoints_map - np.array([x_rear_wheel, y_rear_wheel]), axis=1)
-                    # index_tp = np.argmin(distance)
-                    # cte = None
-                    # if index_tp < x_map.shape[0] - 1:
-                    #     waypoint_vector_x = x_map[index_tp + 1] - x_map[index_tp]
-                    #     waypoint_vector_y = y_map[index_tp + 1] - y_map[index_tp]
-                    #     start_waypoint_to_car_location_x = x_rear_wheel - x_map[index_tp]
-                    #     start_waypoint_to_car_location_y = y_rear_wheel - y_map[index_tp]
-                    #     area = -(start_waypoint_to_car_location_x * waypoint_vector_y -
-                    #              start_waypoint_to_car_location_y * waypoint_vector_x)
-                    #     cte = area / np.linalg.norm(np.array([waypoint_vector_x, waypoint_vector_y]), axis=0)
-                    # else:
-                    #     waypoint_vector_x = x_map[index_tp] - x_map[index_tp - 1]
-                    #     waypoint_vector_y = y_map[index_tp] - y_map[index_tp - 1]
-                    #     start_waypoint_to_car_location_x = x_rear_wheel - x_map[index_tp]
-                    #     start_waypoint_to_car_location_y = y_rear_wheel - y_map[index_tp]
-                    #     area = -(start_waypoint_to_car_location_x * waypoint_vector_y -
-                    #              start_waypoint_to_car_location_y * waypoint_vector_x)
-                    #     cte = area / np.linalg.norm(np.array([waypoint_vector_x, waypoint_vector_y]), axis=0)
-                    # if state == 0:
-                    #     if np.abs(cte) < 1e-1:
-                    #         state = 1
-                    # elif state == 1:
-                    #     control.steer += disturbance
-                    #     if np.abs(cte) > 0.35:
-                    #         state = 2
-                    # elif state == 2:
-                    #     if np.abs(cte) < 1e-1:
-                    #         state = 3
-                    # else:
-                    #     control.steer -= disturbance
-                    #     if np.abs(cte) > 0.35:
-                    #         state = 0
-                    # introduce random noise - sinusoidal signal
-                    control.steer += 0.05 * np.sin(100 * pygame.time.get_ticks() / 1000)
+        print("Saving recorded data.")
+        exported_data = np.array(exported_data)
+        df = pd.DataFrame(data=exported_data, columns=['Ticks(s)', 'x-acc(m/s^2)', 'y-acc(m/s^2)', 'z-acc(m/s^2)', 'x-vel(m/s)', 'y-vel(m/s)', 'z-vel(m/s)', 'x-loc(m)', 'y-loc(m)', 'x-loc-center(m)', 'y-loc-center(m)', 'z-loc-center(m)',
+                                                       'theta(radians)', 'target-speed(m/s)', 'target-x-loc(m)', 'target-y-loc(m)', 'target-z-loc(m)', 'past-throttle', 'past_brake', 'past-delta(radians)', 'throttle', 'brake', 'delta(radians)', 'input', 'speed(m/s)', 'acceleration(m/s^2)', 'd'])
+        df.to_pickle('_out/Data_Collection_SecondLocation' + '.pd')
 
-                    world.player.apply_control(control)
-                else:
-                    agent.update_information()
-
-                    world.tick(clock)
-                    world.render(display)
-                    pygame.display.flip()
-
-                    # Set new destination when target has been reached
-                    if len(agent.get_local_planner().waypoints_queue) < num_min_waypoints and args.loop:
-                        agent.reroute(spawn_points)
-                        tot_target_reached += 1
-                        world.hud.notification("The target has been reached " +
-                                               str(tot_target_reached) + " times.", seconds=4.0)
-
-                    elif len(agent.get_local_planner().waypoints_queue) == 0 and not args.loop:
-                        print("Target reached, mission accomplished...")
-                        break
-
-                    speed_limit = world.player.get_speed_limit()
-                    agent.get_local_planner().set_speed(speed_limit)
-
-                    control = agent.run_step()
-                    world.player.apply_control(control)
-
-        finally:
-            if world is not None:
-                world.destroy()
-
-            print("saving recorded data" + str(i + 1) + ":")
-            exported_data = np.array(exported_data)
-            df = pd.DataFrame(data=exported_data, columns=['Ticks(s)', 'x-acc(m/s^2)', 'y-acc(m/s^2)', 'z-acc(m/s^2)', 'x-vel(m/s)', 'y-vel(m/s)', 'z-vel(m/s)', 'x-loc(m)', 'y-loc(m)', 'x-loc-center(m)', 'y-loc-center(m)', 'z-loc-center(m)',
-                                                           'theta(radians)', 'target-speed(m/s)', 'target-x-loc(m)', 'target-y-loc(m)', 'target-z-loc(m)', 'past-throttle', 'past_brake', 'past-delta(radians)', 'throttle', 'brake', 'delta(radians)', 'input', 'speed(m/s)', 'acceleration(m/s^2)', 'd'])
-            df.to_pickle('_out/Data_Collection_noisy_controller_' + str(i + 1) + '.pd')
-
-            pygame.quit()
+        pygame.quit()
 
 
 # ==============================================================================

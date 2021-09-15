@@ -153,7 +153,7 @@ class World(object):
                 sys.exit(1)
             # spawn_points = self.map.get_spawn_points()
             # spawn_point = carla.Transform(carla.Location(x=-120.7, y=149.3, z=2.0), carla.Rotation(yaw=180))
-            spawn_point = carla.Transform(carla.Location(x=x + 0.1, y=y, z=2.0), carla.Rotation(yaw=theta))
+            spawn_point = carla.Transform(carla.Location(x=x, y=y, z=2.0), carla.Rotation(yaw=theta))
             self.player = self.world.try_spawn_actor(blueprint, spawn_point)
         # Set up the sensors.
         self.collision_sensor = CollisionSensor(self.player, self.hud)
@@ -694,58 +694,47 @@ def game_loop(args):
     # state = 0
     # disturbance = 0.05
 
-    for i in range(18, 107, 1):
-        pygame.init()
-        pygame.font.init()
-        world = None
-        exported_data = []
-        try:
-            client = carla.Client(args.host, args.port)
-            client.set_timeout(4.0)
+    data_number = 0
+    i = 35
+    # lateral_error_range = np.arange(-1.0, 1.0, 0.1)  # -0.8, 0.8, 0.1 # -0.85, 0.85, 0.1
+    # yaw_range = np.arange(-0.4, 0.4, 0.05) / PI * 180  # -0.3, 0.3, 0.05 # -0.35, 0.35, 0.05
+    # v_range = np.arange(0.0, 5.6, 0.2)
+    for lateral_ite in range(20):
+        for yaw_ite in range(20):
+            # for v in v_range:
+            lateral_error = np.random.uniform(-1.0, 1.0)
+            yaw = np.random.uniform(-0.4, 0.4) / PI * 180
+            pygame.init()
+            pygame.font.init()
+            world = None
+            exported_data = []
+            try:
+                client = carla.Client(args.host, args.port)
+                client.set_timeout(4.0)
 
-            display = pygame.display.set_mode(
-                (args.width, args.height),
-                pygame.HWSURFACE | pygame.DOUBLEBUF)
+                display = pygame.display.set_mode(
+                    (args.width, args.height),
+                    pygame.HWSURFACE | pygame.DOUBLEBUF)
 
-            hud = HUD(args.width, args.height)
-            # world = World(client.get_world(), hud, args)
-            world = World(client.load_world('Town06'), hud, args,
-                          initial_position_array[0, i], initial_position_array[1, i], initial_position_array[2, i])
-            controller = KeyboardControl(world)
+                hud = HUD(args.width, args.height)
+                # world = World(client.get_world(), hud, args)
+                world = World(client.load_world('Town06'), hud, args,
+                              initial_position_array[0, i] - lateral_error, initial_position_array[1, i], initial_position_array[2, i] + yaw)
+                controller = KeyboardControl(world)
 
-            if args.agent == "Roaming":
                 agent = RoamingAgent(world.player)
-            elif args.agent == "Basic":
-                agent = BasicAgent(world.player)
-                spawn_point = world.map.get_spawn_points()[0]
-                agent.set_destination((spawn_point.location.x,
-                                       spawn_point.location.y,
-                                       spawn_point.location.z))
-            else:
-                agent = BehaviorAgent(world.player, behavior=args.behavior)
 
-                spawn_points = world.map.get_spawn_points()
-                random.shuffle(spawn_points)
+                clock = pygame.time.Clock()
 
-                if spawn_points[0].location != agent.vehicle.get_location():
-                    destination = spawn_points[0].location
-                else:
-                    destination = spawn_points[1].location
+                while True and len(exported_data) <= 300:
+                    clock.tick_busy_loop(60)
+                    if controller.parse_events(client, world, clock):
+                        return
 
-                agent.set_destination(agent.vehicle.get_location(), destination, clean=True)
+                    # As soon as the server is ready continue!
+                    if not world.world.wait_for_tick(10.0):
+                        continue
 
-            clock = pygame.time.Clock()
-
-            while True and len(exported_data) <= 1487:
-                clock.tick_busy_loop(60)
-                if controller.parse_events(client, world, clock):
-                    return
-
-                # As soon as the server is ready continue!
-                if not world.world.wait_for_tick(10.0):
-                    continue
-
-                if args.agent == "Roaming" or args.agent == "Basic":
                     if controller.parse_events(client, world, clock):
                         return
 
@@ -785,8 +774,22 @@ def game_loop(args):
                                           70 / 180 * PI, np.tan(control.steer * 70 / 180 * PI),
                                           np.sqrt(velocity.x * velocity.x + velocity.y * velocity.y), np.sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y), -_ie])
 
-                    # introduce random noise - sinusoidal signal
-                    control.throttle += 0.2 * np.sin(100 * pygame.time.get_ticks() / 1000)
+                    target_theta = 0
+                    # target_theta = 180
+                    target_y_rear_wheel = initial_position_array[1, 60]
+                    # target_y_rear_wheel = initial_position_array[1, 0]
+                    if abs(y_rear_wheel - target_y_rear_wheel) < 0.1 and abs(location.rotation.yaw - target_theta) < 2:
+                        print("saving recorded data" + str(data_number + 1) + ":")
+                        exported_data = np.array(exported_data)
+                        df = pd.DataFrame(data=exported_data, columns=['Ticks(s)', 'x-acc(m/s^2)', 'y-acc(m/s^2)', 'z-acc(m/s^2)', 'x-vel(m/s)', 'y-vel(m/s)', 'z-vel(m/s)', 'x-loc(m)', 'y-loc(m)', 'x-loc-center(m)', 'y-loc-center(m)', 'z-loc-center(m)',
+                                                                       'theta(radians)', 'target-speed(m/s)', 'target-x-loc(m)', 'target-y-loc(m)', 'target-z-loc(m)', 'past-throttle', 'past_brake', 'past-delta(radians)', 'throttle', 'brake', 'delta(radians)', 'input', 'speed(m/s)', 'acceleration(m/s^2)', 'd'])
+                        df.to_pickle('_out/Data_Collection_sample_state_space_lateralerr_' +
+                                     str(lateral_error) + '_yawangle_' + str(yaw) + '.pd')
+                        data_number += 1
+                        break
+
+                    # # introduce random noise - sinusoidal signal
+                    # control.throttle += 0.2 * np.sin(100 * pygame.time.get_ticks() / 1000)
                     # # add the disturbance to lateral
                     # distance = np.linalg.norm(waypoints_map - np.array([x_rear_wheel, y_rear_wheel]), axis=1)
                     # index_tp = np.argmin(distance)
@@ -821,45 +824,16 @@ def game_loop(args):
                     #     control.steer -= disturbance
                     #     if np.abs(cte) > 0.35:
                     #         state = 0
-                    # introduce random noise - sinusoidal signal
-                    control.steer += 0.05 * np.sin(100 * pygame.time.get_ticks() / 1000)
+                    # # introduce random noise - sinusoidal signal
+                    # control.steer += 0.05 * np.sin(100 * pygame.time.get_ticks() / 1000)
 
                     world.player.apply_control(control)
-                else:
-                    agent.update_information()
 
-                    world.tick(clock)
-                    world.render(display)
-                    pygame.display.flip()
+            finally:
+                if world is not None:
+                    world.destroy()
 
-                    # Set new destination when target has been reached
-                    if len(agent.get_local_planner().waypoints_queue) < num_min_waypoints and args.loop:
-                        agent.reroute(spawn_points)
-                        tot_target_reached += 1
-                        world.hud.notification("The target has been reached " +
-                                               str(tot_target_reached) + " times.", seconds=4.0)
-
-                    elif len(agent.get_local_planner().waypoints_queue) == 0 and not args.loop:
-                        print("Target reached, mission accomplished...")
-                        break
-
-                    speed_limit = world.player.get_speed_limit()
-                    agent.get_local_planner().set_speed(speed_limit)
-
-                    control = agent.run_step()
-                    world.player.apply_control(control)
-
-        finally:
-            if world is not None:
-                world.destroy()
-
-            print("saving recorded data" + str(i + 1) + ":")
-            exported_data = np.array(exported_data)
-            df = pd.DataFrame(data=exported_data, columns=['Ticks(s)', 'x-acc(m/s^2)', 'y-acc(m/s^2)', 'z-acc(m/s^2)', 'x-vel(m/s)', 'y-vel(m/s)', 'z-vel(m/s)', 'x-loc(m)', 'y-loc(m)', 'x-loc-center(m)', 'y-loc-center(m)', 'z-loc-center(m)',
-                                                           'theta(radians)', 'target-speed(m/s)', 'target-x-loc(m)', 'target-y-loc(m)', 'target-z-loc(m)', 'past-throttle', 'past_brake', 'past-delta(radians)', 'throttle', 'brake', 'delta(radians)', 'input', 'speed(m/s)', 'acceleration(m/s^2)', 'd'])
-            df.to_pickle('_out/Data_Collection_noisy_controller_' + str(i + 1) + '.pd')
-
-            pygame.quit()
+                pygame.quit()
 
 
 # ==============================================================================
